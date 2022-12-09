@@ -1,0 +1,186 @@
+name: Check firmware update
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 12 * * *"
+  push:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - model: "SM-G991B"
+            region: "AUT"
+            codename: "o1s"
+          - model: "SM-G996B"
+            region: "AUT"
+            codename: "t2s"
+          - model: "SM-G998B"
+            region: "AUT"
+            codename: "p3s"
+          - model: "SM-G991N"
+            region: "KOO"
+            codename: "o1s"
+          - model: "SM-G996N"
+            region: "KOO"
+            codename: "t2s"
+          - model: "SM-G998N"
+            region: "KOO"
+            codename: "p3s"
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          submodules: true
+
+      - name: Compare latest version with current version
+        id: check
+        run: |
+          need_update=0
+          latest=`curl --retry 5 --retry-delay 5 http://fota-cloud-dn.ospserver.net/firmware/${{ matrix.region }}/${{ matrix.model }}/version.xml | grep latest | sed 's/^[^>]*>//' | sed 's/<.*//'`
+          latest_short=`echo $latest | cut -d'/' -f1`
+          latest_csc=`echo $latest | cut -d'/' -f2`
+          latest_modem=`echo $latest | cut -d'/' -f3`
+          current=`cat current.${{ matrix.model }}` || need_update=1
+          [[ $latest != $current ]] && need_update=1
+          echo "latest_version=$latest" >> $GITHUB_ENV
+          echo "latest_shortversion=$latest_short" >> $GITHUB_ENV
+          echo "latest_cscversion=$latest_csc" >> $GITHUB_ENV
+          echo "latest_modemversion=$latest_modem" >> $GITHUB_ENV
+          echo "need_update=$need_update" >> $GITHUB_ENV
+
+      - name: Install dependencies
+        if: env.need_update == 1
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y liblz4-tool zip
+          sudo wget -O /usr/bin/dtc https://corsica.nu/dtc && sudo chmod +x /usr/bin/dtc
+          sudo wget -O /usr/bin/mkdtimg https://corsica.nu/mkdtimg && sudo chmod +x /usr/bin/mkdtimg
+          sudo wget -O /usr/bin/splitdt https://corsica.nu/splitdt && sudo chmod +x /usr/bin/splitdt
+          sudo wget -O /usr/bin/unpackbootimg https://corsica.nu/unpackbootimg && sudo chmod +x /usr/bin/unpackbootimg
+          sudo wget -O /usr/bin/extract-ikconfig https://corsica.nu/extract-ikconfig && sudo chmod +x /usr/bin/extract-ikconfig
+          sudo wget -O /usr/bin/samfirm https://github.com/jesec/SamFirm.NET/releases/latest/download/linux-x64 && sudo chmod +x /usr/bin/samfirm
+
+      - name: Fetch firmware
+        if: env.need_update == 1
+        run: samfirm -m ${{ matrix.model }} -r ${{ matrix.region }}
+
+      - name: Print directory structure
+        if: env.need_update == 1
+        run: ls -la ${{ matrix.model }}_${{ matrix.region }}
+
+      - name: Get path of files
+        if: env.need_update == 1
+        id: files
+        run: |
+          echo "bl=`find -name BL*`" >> $GITHUB_ENV
+          echo "ap=`find -name AP*`" >> $GITHUB_ENV
+          echo "cp=`find -name CP*`" >> $GITHUB_ENV
+          echo "csc=`find -name HOME_CSC*`" >> $GITHUB_ENV
+
+      - name: Check downloaded firmware version
+        if: env.need_update == 1
+        run: |
+          version_short=`echo ${{ env.ap }} | cut -d'_' -f3`
+          version_csc=`echo ${{ env.csc }} | cut -d'_' -f5`
+          version_modem=`echo ${{ env.cp }} | cut -d'_' -f3`
+          [[ $version_short == ${{ env.latest_shortversion }} ]]
+          [[ $version_csc == ${{ env.latest_cscversion }} ]]
+          [[ $version_modem == ${{ env.latest_modemversion }} ]]
+          echo PDA version: $version_short > versions.txt
+          echo CSC version: $version_csc >> versions.txt
+          echo Modem version: $version_modem >> versions.txt
+
+      - name: Print available disk space
+        if: env.need_update == 1
+        run: |
+          pwd
+          sudo df -h
+          
+      - name: Create zip environment
+        if: env.need_update == 1
+        run: |
+          target_device=`echo ${{ matrix.model }} | cut -d'-' -f2`
+          target_version=${{ env.latest_shortversion }}
+          mkdir -p $target_version configs tmp
+          
+      - name: Extract images from AP/BL, dump configs and create zips
+        if: env.need_update == 1
+        id: releases
+        run: |
+          target_version=${{ env.latest_shortversion }}
+          bls=(dpm.img harx.bin keystorage.bin ldfw.img sboot.bin ssp.img tzar.img tzsw.img uh.bin vddcal_fw.bin up_param.bin dtbo.img modem.bin)
+          tar xvf ${{ env.ap }} dtbo.img.lz4 boot.img.lz4 vendor_boot.img.lz4 recovery.img.lz4 super.img.lz4
+          tar xvf ${{ env.bl }} 
+          tar xvf ${{ env.cp }}
+          for i in `ls | grep lz4`; do lz4 -dm $i ; rm -rf $i; done
+          for i in `ls | grep img`; do echo -n $i " " >> configs/exynos2100-${{ matrix.codename }}_sizes; stat --printf="%s" $i >> configs/exynos2100-${{ matrix.codename }}_sizes; echo "" >> configs/exynos2100-${{ matrix.codename }}_sizes; done
+          extract-ikconfig boot.img > configs/exynos2100-${{ matrix.codename }}_boot_defconfig
+          rm -rf super.img && cd tmp
+          unpackbootimg -i ../boot.img > ../configs/bootimg.args && rm -rf *
+          unpackbootimg -i ../vendor_boot.img > ../configs/vendorbootimg.args && mkdtimg dump vendor_boot.img-dtb > ../configs/exynos2100.cfg && cp -r vendor_boot.img-vendor_ramdisk ../configs/vendor_ramdisk.cpio.gz
+          splitdt vendor_boot.img-dtb && dtc dtbdump_* -I dtb -O dts -o ../configs/exynos2100.dts && rm -rf *
+          mkdtimg dump ../dtbo.img >> ../configs/${{ matrix.codename }}.cfg && splitdt ../dtbo.img
+          for i in `ls | grep dtbdump_`; do dtc $i -I dtb -O dts -o $i.txt; done
+          for i in `ls | grep txt`; do
+            board=$(cat $i | grep -m 1 "compatible =" | sed 's/SAMSUNG,//g; s/\\0//g; s/\"//g; s/compatible = //; s/\;//; s/EXYNOS2100//' | awk '{print tolower($0)}');
+            board_id=$(cat $i | grep -m 1 "board_id =" | sed 's/<//g; s/\"//g; s/board_id = //; s/\;//; s/>//') && board_id=`printf "%02d" $((board_id))`;
+            hw_rev=$(cat $i | grep -m 1 "dtbo-hw_rev =" | sed 's/<//g; s/\"//g; s/dtbo-hw_rev = //; s/\;//; s/>//') && hw_rev=`printf "%02d" $((hw_rev))`;
+            dt_file="$board"_w"$board_id"_r"$hw_rev".dts;
+            mv $i ../configs/$(echo $dt_file);
+          done
+          cd ../configs
+          zip -r ../$target_version-configs.zip *
+          cd ..
+          mv boot.img $target_version-stock_boot.img
+          mv vendor_boot.img $target_version-stock_vendor_boot.img
+          mv recovery.img $target_version-stock_recovery.img
+          for i in ${bls[@]}; do [[ -e $i ]] && mv $i $target_version/$i; done
+          cd $target_version
+          tar cvf ../$target_version-odin_flashable.tar *
+          cd .. && ls
+          echo "tar=`find -name $target_version-odin_flashable.tar`" >> $GITHUB_ENV
+          echo "boot=`find -name $target_version-stock_boot.img`" >> $GITHUB_ENV
+          echo "vendor_boot=`find -name $target_version-stock_vendor_boot.img`" >> $GITHUB_ENV
+          echo "recovery=`find -name $target_version-stock_recovery.img`" >> $GITHUB_ENV
+          echo "configs=`find -name $target_version-configs.zip`" >> $GITHUB_ENV
+
+      - name: Update current version
+        if: env.need_update == 1
+        run: |
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git pull origin ${{github.ref}} --ff-only
+          echo ${{ env.latest_version }} > current.${{ matrix.model }}
+          git add current.${{ matrix.model }}
+          git commit -m "${{ matrix.model }}: ${{ env.latest_version }}"
+          git tag ${{ env.latest_shortversion }}
+
+      - name: Push changes to repo
+        if: env.need_update == 1
+        uses: ad-m/github-push-action@master
+        with:
+          tags: true
+          github_token: ${{ secrets.TOKEN }}
+
+      - name: Upload release assets
+        if: env.need_update == 1
+        uses: CaptainThrowback/action-gh-release@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.TOKEN }}
+        with:
+          body_path: versions.txt
+          tag_name: ${{ env.latest_shortversion }}
+          files: |
+            ${{ env.tar }}
+            ${{ env.boot }}
+            ${{ env.vendor_boot }}
+            ${{ env.recovery }}
+            ${{ env.configs }}
