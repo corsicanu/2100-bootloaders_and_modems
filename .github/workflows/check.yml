@@ -17,22 +17,22 @@ jobs:
         include:
           - model: "SM-G991B"
             region: "AUT"
-            codename: "o1s"
+            codename: "o1sxxx"
           - model: "SM-G996B"
             region: "AUT"
-            codename: "t2s"
+            codename: "t2sxxx"
           - model: "SM-G998B"
             region: "AUT"
-            codename: "p3s"
+            codename: "p3sxxx"
           - model: "SM-G991N"
             region: "KOO"
-            codename: "o1s"
+            codename: "o1sksx"
           - model: "SM-G996N"
             region: "KOO"
-            codename: "t2s"
+            codename: "t2sksx"
           - model: "SM-G998N"
             region: "KOO"
-            codename: "p3s"
+            codename: "p3sksx"
 
     steps:
       - name: Checkout repo
@@ -122,7 +122,7 @@ jobs:
           tar xvf ${{ env.cp }}
           for i in `ls | grep lz4`; do lz4 -dm $i ; rm -rf $i; done
           for i in `ls | grep img`; do echo -n $i " " >> configs/exynos2100-${{ matrix.codename }}_sizes; stat --printf="%s" $i >> configs/exynos2100-${{ matrix.codename }}_sizes; echo "" >> configs/exynos2100-${{ matrix.codename }}_sizes; done
-          extract-ikconfig boot.img > configs/exynos2100-${{ matrix.codename }}_boot_defconfig
+          extract-ikconfig boot.img > configs/exynos2100-${{ matrix.codename }}_defconfig
           rm -rf super.img && cd tmp
           unpackbootimg -i ../boot.img > ../configs/bootimg.args && rm -rf *
           unpackbootimg -i ../vendor_boot.img > ../configs/vendorbootimg.args && mkdtimg dump vendor_boot.img-dtb > ../configs/exynos2100.cfg && cp -r vendor_boot.img-vendor_ramdisk ../configs/vendor_ramdisk.cpio.gz
