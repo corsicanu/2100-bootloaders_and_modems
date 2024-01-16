@@ -77,7 +77,7 @@ jobs:
 
       - name: Fetch firmware
         if: env.need_update == 1
-        run: samfirm -m ${{ matrix.model }} -r ${{ matrix.region }}
+        run: samfirm -m ${{ matrix.model }} -r ${{ matrix.region }} -i ${{ matrix.imei }}
 
       - name: Print directory structure
         if: env.need_update == 1
