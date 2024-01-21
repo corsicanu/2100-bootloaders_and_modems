@@ -35,6 +35,10 @@ jobs:
             region: "KOO"
             codename: "t2sksx"
             imei: "353561331234561"
+          - model: "SM-G998N"
+            region: "KOO"
+            codename: "p3sksx"
+            imei: "352412371234569"
 
     steps:
       - name: Checkout repo
