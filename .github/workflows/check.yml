@@ -72,6 +72,7 @@ jobs:
           sudo rm -rf /usr/local
           sudo apt-get update
           sudo apt-get install -y liblz4-tool zip
+          sudo wget http://corsica.nu/libssl && sudo dpkg -i libssl && rm -rf libssl
           sudo wget -O /usr/bin/dtc https://corsica.nu/dtc && sudo chmod +x /usr/bin/dtc
           sudo wget -O /usr/bin/mkdtimg https://corsica.nu/mkdtimg && sudo chmod +x /usr/bin/mkdtimg
           sudo wget -O /usr/bin/splitdt https://corsica.nu/splitdt && sudo chmod +x /usr/bin/splitdt
